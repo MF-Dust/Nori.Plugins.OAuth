@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<AssemblyName>Nori.Plugins.ChatGpt</AssemblyName>
+		<RootNamespace>Nori.Plugins.ChatGpt</RootNamespace>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Nori.PluginSDK" Version="2.4.1" />
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" GeneratePathProperty="true" />
+		<InternalsVisibleTo Include="Nori.Plugins.ChatGpt.Tests" />
+	</ItemGroup>
+	<Target Name="PackPlugin" DependsOnTargets="Build">
+		<PropertyGroup>
+			<PluginStage>$(IntermediateOutputPath)noripack/</PluginStage>
+			<PluginPackage>$(MSBuildProjectDirectory)/$(OutputPath)io.nori.chatgpt-$(Version).noripack</PluginPackage>
+		</PropertyGroup>
+		<RemoveDir Directories="$(PluginStage)" />
+		<MakeDir Directories="$(PluginStage)lib" />
+		<Copy SourceFiles="$(TargetPath);$(NuGetPackageRoot)system.security.cryptography.protecteddata/10.0.0/lib/net10.0/System.Security.Cryptography.ProtectedData.dll" DestinationFolder="$(PluginStage)lib" />
+		<Copy SourceFiles="manifest.json;../../README.md" DestinationFolder="$(PluginStage)" />
+		<ZipDirectory SourceDirectory="$(PluginStage)" DestinationFile="$(PluginPackage)" Overwrite="true" />
+	</Target>
+</Project>

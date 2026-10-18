@@ -1,0 +1,24 @@
+name: build
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 10.0.x
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsecret-tools
+      - run: dotnet test tests/Nori.Plugins.ChatGpt.Tests/Nori.Plugins.ChatGpt.Tests.csproj -c Release -m:1
+      - run: dotnet msbuild src/Nori.Plugins.ChatGpt/Nori.Plugins.ChatGpt.csproj -t:PackPlugin -p:Configuration=Release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: noripack-${{ runner.os }}
+          path: src/Nori.Plugins.ChatGpt/bin/Release/net10.0/*.noripack

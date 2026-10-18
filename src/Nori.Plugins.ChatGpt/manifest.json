@@ -1,0 +1,29 @@
+{
+	"schemaVersion": 1,
+	"id": "io.nori.chatgpt",
+	"name": "ChatGPT OAuth",
+	"description": "通过 ChatGPT 账号的 Codex OAuth 使用 AI 提供商，无需 OpenAI API 密钥。",
+	"version": "1.0.1",
+	"authors": [
+		{
+			"name": "Nori"
+		}
+	],
+	"apiVersion": "2.4",
+	"runtime": {
+		"kind": "dotnet",
+		"assembly": "lib/Nori.Plugins.ChatGpt.dll",
+		"entryType": "Nori.Plugins.ChatGpt.Plugin"
+	},
+	"capabilities": [
+		"ai.provider",
+		"ui.avalonia"
+	],
+	"optionalCapabilities": [],
+	"platforms": [
+		"windows",
+		"linux",
+		"macos"
+	],
+	"dependencies": []
+}
