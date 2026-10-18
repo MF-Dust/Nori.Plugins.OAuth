@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Nori.PluginRuntime;
 using System.Diagnostics;
 
@@ -41,26 +42,57 @@ internal sealed class LoginPage : IPluginPage
 		_open.Click += OnOpen;
 		_cancel.Click += OnCancel;
 		_signOut.Click += OnSignOut;
+		_login.Classes.Add("accent");
+		_signOut.Classes.Add("danger");
+		foreach (Button button in new[] { _login, _open, _cancel, _signOut }) button.MinHeight = 32;
+		_status.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("SettingsSecondaryBrush"));
+		_status.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("NoriFontBase"));
+
 		_root = new StackPanel
 		{
-			Spacing = 16, Margin = new Thickness(24), MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left,
+			// 设置窗口已提供标题和页面边距，不再叠加第二层外壳。
+			Spacing = 28, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Stretch,
 			Children =
 			{
-				new TextBlock { Text = "连接 ChatGPT", FontSize = 24, FontWeight = FontWeight.SemiBold },
-				new TextBlock { Text = "使用 ChatGPT 账号授权 Codex 模型，无需填写 OpenAI API 密钥。可用模型与额度取决于账号。", TextWrapping = TextWrapping.Wrap },
-				_status,
-				_login,
-				new TextBlock { Text = "设备授权码（可选中复制）" },
-				_code,
-				new WrapPanel { Orientation = Orientation.Horizontal, Children = { _open, _cancel, _signOut } },
-				new TextBlock { Text = "若授权网页拒绝设备码，请先在 ChatGPT → 设置 → 安全中启用设备代码授权。登录成功后，在 Nori 的模型服务中选择此提供商和模型。", TextWrapping = TextWrapping.Wrap },
-				new TextBlock { Text = "登录凭证以加密形式保存在插件数据中，密钥由 Windows 当前用户 DPAPI、macOS 钥匙串或 Linux 密钥环保护。退出会清除此插件保存的登录状态，不会退出浏览器账号或撤销远端授权。", TextWrapping = TextWrapping.Wrap },
+				Section("账号连接",
+					Description("使用 ChatGPT 账号授权 Codex 模型，无需填写 OpenAI API 密钥。可用模型与额度取决于账号。"),
+					_status,
+					new WrapPanel { Orientation = Orientation.Horizontal, Children = { _login, _signOut } }),
+				Section("设备授权",
+					Description("点击登录后，在系统浏览器中输入下方设备码（可选中复制）。"),
+					_code,
+					new WrapPanel { Orientation = Orientation.Horizontal, Children = { _open, _cancel } },
+					Description("若网页拒绝设备码，请先在 ChatGPT → 设置 → 安全中启用设备代码授权。")),
+				Section("使用与隐私",
+					Description("登录成功后，在 Nori 的模型服务中选择 ChatGPT (OAuth / Codex) 和模型。"),
+					Description("登录凭证加密保存在插件数据中，由 Windows 当前用户 DPAPI、macOS 钥匙串或 Linux 密钥环保护。退出登录会清除本插件保存的数据，不会退出浏览器账号或撤销远端授权。")),
 			},
 		};
+		_login.Margin = new Thickness(0, 0, 8, 8);
 		Control = new ScrollViewer { Content = _root, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
 	}
 
 	public Control Control { get; }
+
+	private static TextBlock Description(string text)
+	{
+		TextBlock block = new() { Text = text, TextWrapping = TextWrapping.Wrap };
+		block.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("SettingsSecondaryBrush"));
+		block.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("NoriFontXs"));
+		return block;
+	}
+
+	private static StackPanel Section(string title, params Control[] controls)
+	{
+		TextBlock heading = new() { Text = title, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap };
+		heading.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("SettingsPrimaryBrush"));
+		heading.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("NoriFontBase"));
+		StackPanel body = new() { Spacing = 10, Margin = new Thickness(0, 12, 0, 0) };
+		foreach (Control control in controls) body.Children.Add(control);
+		Border divider = new() { BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 10, 0, 0), Child = body };
+		divider.Bind(Border.BorderBrushProperty, new DynamicResourceExtension("SettingsBorderBrush"));
+		return new StackPanel { Children = { heading, divider } };
+	}
 
 	private async void OnLogin(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
 	{

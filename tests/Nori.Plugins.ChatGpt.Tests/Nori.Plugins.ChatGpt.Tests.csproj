@@ -20,6 +20,6 @@
 		<PackageReference Include="Avalonia.Headless" Version="12.1.1" />
 		<PackageReference Include="Avalonia.Skia" Version="12.1.1" />
 		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
-		<ProjectReference Include="$(NoriDesktopRoot)/app/desktop/Nori.PluginRuntime/Nori.PluginRuntime.csproj" />
+		<ProjectReference Include="$(NoriDesktopRoot)/app/desktop/Nori.Desktop/Nori.Desktop.csproj" />
 	</ItemGroup>
 </Project>

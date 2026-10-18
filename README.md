@@ -14,9 +14,11 @@ dotnet test tests/Nori.Plugins.ChatGpt.Tests/Nori.Plugins.ChatGpt.Tests.csproj -
 dotnet msbuild src/Nori.Plugins.ChatGpt/Nori.Plugins.ChatGpt.csproj -t:PackPlugin -p:Configuration=Release
 ```
 
-生成包位于 `src/Nori.Plugins.ChatGpt/bin/Release/net10.0/io.nori.chatgpt-1.0.1.noripack`。在 Nori 设置 → 插件 → 本地安装启用，再从 ChatGPT OAuth 设置页登录；模型服务选择 ChatGPT (OAuth / Codex)，API Key 留空。
+生成包位于 `src/Nori.Plugins.ChatGpt/bin/Release/net10.0/io.nori.chatgpt-1.0.2.noripack`。在 Nori 设置 → 插件 → 本地安装启用，再从 ChatGPT OAuth 设置页登录；模型服务选择 ChatGPT (OAuth / Codex)，API Key 留空。
 
 设备码登录需要用户在系统浏览器中授权。真实设备授权与账号配额需安装后手动验证；测试使用模拟响应，并覆盖刷新令牌轮换与保存重试、退出删除重试、停用后凭证保留、恢复失败及敏感信息不泄漏。
+
+登录页复用宿主 Nori 主题的字体、青色主按钮、危险操作样式、输入框与细线分组；生产插件不引用宿主程序集。可选 UI 测试直接加载主程序的实际主题，并检查 720×480 与 1080p 布局。
 
 ## 行为与边界
 

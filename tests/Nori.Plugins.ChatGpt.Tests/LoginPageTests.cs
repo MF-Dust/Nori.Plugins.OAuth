@@ -4,7 +4,7 @@ using Avalonia.Headless;
 using Avalonia.LogicalTree;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
-using Avalonia.Themes.Fluent;
+using Avalonia.Markup.Xaml.Styling;
 
 namespace Nori.Plugins.ChatGpt.Tests;
 
@@ -12,16 +12,7 @@ public sealed class LoginPageTests
 {
 	private static readonly Lazy<HeadlessUnitTestSession> Session = new(() => HeadlessUnitTestSession.StartNew(typeof(LoginPageTests), AvaloniaTestIsolationLevel.PerTest));
 
-	public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<TestApp>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia();
-
-	public sealed class TestApp : Application
-	{
-		public override void Initialize()
-		{
-			RequestedThemeVariant = ThemeVariant.Dark;
-			Styles.Add(new FluentTheme());
-		}
-	}
+	public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<Nori.Desktop.App>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia();
 
 	[Theory]
 	[InlineData(720, 480)]
@@ -30,7 +21,11 @@ public sealed class LoginPageTests
 	{
 		using HttpClient http = new(new NoNetwork());
 		using LoginPage page = new(new ChatGptAuth(http), default);
-		Window window = new() { Width = width, Height = height, Content = page.Control };
+		Window window = new() { Width = width, Height = height, Content = new Border { Padding = new Thickness(28, 20, 28, 28), Child = page.Control }, RequestedThemeVariant = ThemeVariant.Dark };
+		window.Styles.Add(new StyleInclude(new Uri("avares://Nori.Desktop/"))
+		{
+			Source = new Uri("avares://Nori.Desktop/Settings/SettingsTheme.axaml"),
+		});
 		try
 		{
 			window.Show();
@@ -41,6 +36,15 @@ public sealed class LoginPageTests
 			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "登录 ChatGPT") && item.IsEnabled);
 			TextBox code = Assert.Single(page.Control.GetLogicalDescendants().OfType<TextBox>());
 			Assert.True(code.IsReadOnly);
+			Button login = Assert.Single(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "登录 ChatGPT"));
+			Assert.Contains("accent", login.Classes);
+			Assert.Equal(32, login.MinHeight);
+			Assert.Equal(6, login.CornerRadius.TopLeft);
+			Assert.Equal(13, login.FontSize);
+			TextBlock heading = Assert.Single(page.Control.GetLogicalDescendants().OfType<TextBlock>(), item => item.Text == "账号连接");
+			Assert.Equal(14, heading.FontSize);
+			Assert.Equal(window.Foreground, heading.Foreground);
+			Assert.Contains("danger", Assert.Single(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "退出登录")).Classes);
 			string? directory = Environment.GetEnvironmentVariable("NORI_UI_CAPTURE_DIR");
 			if (!string.IsNullOrEmpty(directory))
 			{

@@ -3,7 +3,7 @@
 	"id": "io.nori.chatgpt",
 	"name": "ChatGPT OAuth",
 	"description": "通过 ChatGPT 账号的 Codex OAuth 使用 AI 提供商，无需 OpenAI API 密钥。",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"authors": [
 		{
 			"name": "Nori"
