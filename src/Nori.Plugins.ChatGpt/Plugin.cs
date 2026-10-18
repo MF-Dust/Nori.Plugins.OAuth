@@ -16,13 +16,17 @@ public sealed class Plugin : INoriPlugin
 		cancellationToken.ThrowIfCancellationRequested();
 		_lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.StoppingToken);
 		_http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
-		string key = "oauth_credentials";
+		const string credentialKey = "oauth_credentials";
+		const string hostIdKey = "oauth_host_id";
 		CredentialStore store = new(
-			ct => new(Task.Run(async () => await context.Storage.GetAsync(key, ct), ct)),
-			(value, ct) => new(Task.Run(async () => await context.Storage.SetAsync(key, value, ct), ct)),
-			ct => new(Task.Run(async () => await context.Storage.DeleteAsync(key, ct), ct)),
+			ct => new(Task.Run(async () => await context.Storage.GetAsync(credentialKey, ct), ct)),
+			(value, ct) => new(Task.Run(async () => await context.Storage.SetAsync(credentialKey, value, ct), ct)),
+			ct => new(Task.Run(async () => await context.Storage.DeleteAsync(credentialKey, ct), ct)),
 			new PlatformCredentialProtection());
-		_auth = new ChatGptAuth(_http, store);
+		HostIdStore hostIdStore = new(
+			ct => Task.Run(async () => (await context.Storage.GetAsync(hostIdKey, ct))?.GetValue<string>(), ct),
+			(value, ct) => Task.Run(async () => await context.Storage.SetAsync(hostIdKey, System.Text.Json.Nodes.JsonValue.Create(value), ct), ct));
+		_auth = new ChatGptAuth(_http, store, hostIdStore);
 		await _auth.RestoreAsync(cancellationToken);
 		_registrations.Add(context.Contributions.Register(new Provider(_http, _auth)));
 		_registrations.Add(context.Contributions.Register(new LoginPageContribution(_auth, _lifetime.Token)));
@@ -41,20 +45,16 @@ public sealed class Plugin : INoriPlugin
 		_lifetime = null;
 	}
 
-	private sealed class Provider(HttpClient http, ChatGptAuth auth) : IPluginChatProviderContribution
+	internal sealed class Provider(HttpClient http, ChatGptAuth auth) : IPluginChatProviderContribution
 	{
 		public string Id => "chatgpt";
-		public string Name => "ChatGPT (OAuth / Codex)";
-		public string DefaultBaseUrl => "https://chatgpt.com/backend-api/codex";
+		public string Name => "ChatGPT (OAuth)";
+		public string DefaultBaseUrl => ChatGptModelCatalog.DefaultBaseUrl;
 		public bool RequiresApiKey => false;
 
 		public IChatClient CreateClient(PluginChatClientOptions options) => new ChatGptChatClient(http, auth.GetCredentialAsync, options.Model);
 
-		public ValueTask<IReadOnlyList<string>> GetModelsAsync(PluginChatClientOptions options, CancellationToken cancellationToken)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			// Codex 没有稳定的公开模型发现 API；用户也可在宿主输入其账号支持的模型 ID。
-			return ValueTask.FromResult<IReadOnlyList<string>>(["gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.2"]);
-		}
+		public ValueTask<IReadOnlyList<string>> GetModelsAsync(PluginChatClientOptions options, CancellationToken cancellationToken) =>
+			ChatGptModelCatalog.GetModelsAsync(http, auth, cancellationToken);
 	}
 }

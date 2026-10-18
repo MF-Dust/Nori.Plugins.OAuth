@@ -13,8 +13,10 @@ public sealed class PluginTests
 		IPluginChatProviderContribution provider = Assert.Single(context.Registry.Items.OfType<IPluginChatProviderContribution>());
 		Assert.False(provider.RequiresApiKey);
 		Assert.Equal("chatgpt", provider.Id);
+		Assert.Equal("https://api.openai.com/v1", provider.DefaultBaseUrl);
 		Assert.Equal(PluginPagePlacement.Settings, Assert.Single(context.Registry.Items.OfType<IPluginPageContribution>()).Placement);
-		Assert.NotEmpty(await provider.GetModelsAsync(new("https://untrusted.invalid", "ignored", ""), default));
+		InvalidOperationException modelError = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.GetModelsAsync(new("https://untrusted.invalid", "ignored", ""), default).AsTask());
+		Assert.Contains("登录", modelError.Message, StringComparison.Ordinal);
 		using (var client = provider.CreateClient(new("https://untrusted.invalid", "ignored", "gpt-5.4")))
 		{
 			InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync([new(Microsoft.Extensions.AI.ChatRole.User, "hello")]));

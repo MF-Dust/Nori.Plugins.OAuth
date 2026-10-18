@@ -2,8 +2,8 @@
 	"schemaVersion": 1,
 	"id": "io.nori.chatgpt",
 	"name": "ChatGPT OAuth",
-	"description": "通过 ChatGPT 账号的 Codex OAuth 使用 AI 提供商，无需 OpenAI API 密钥。",
-	"version": "1.0.3",
+	"description": "通过 OpenAI 官方 Sign in with ChatGPT OAuth 使用 ChatGPT plan，无需 OpenAI API 密钥。",
+	"version": "1.1.0",
 	"authors": [
 		{
 			"name": "Nori"

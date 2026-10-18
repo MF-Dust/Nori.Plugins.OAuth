@@ -1,6 +1,6 @@
 # ChatGPT OAuth · Nori Desktop 插件
 
-独立的 `.noripack` 插件，需要 Nori Desktop 2.0.2 或更高版本、Plugin API 2.4 / .NET 10。凭证由 Windows 当前用户 DPAPI、macOS Keychain 或 Linux Secret Service 保护，并以密文存储在插件 `oauth_credentials` KV 项中。Linux 需要安装 `secret-tool` 并解锁密钥环；不提供明文回退。插件数据由宿主存放于 `<PackageRoot>/data/plugins`。
+独立的 `.noripack` 插件，需要 Nori Desktop 2.0.2 或更高版本、Plugin API 2.4 / .NET 10。插件使用 OpenAI 官方 Sign in with ChatGPT OAuth：系统浏览器授权、PKCE S256、state/nonce、127.0.0.1 临时回调和已签名 ID token 验证；推理及模型发现走 `https://api.openai.com/v1`。生产插件不引用宿主业务程序集，未修改 Plugin SDK。
 
 ## 构建和测试
 
@@ -14,15 +14,25 @@ dotnet test tests/Nori.Plugins.ChatGpt.Tests/Nori.Plugins.ChatGpt.Tests.csproj -
 dotnet msbuild src/Nori.Plugins.ChatGpt/Nori.Plugins.ChatGpt.csproj -t:PackPlugin -p:Configuration=Release
 ```
 
-生成包位于 `src/Nori.Plugins.ChatGpt/bin/Release/net10.0/io.nori.chatgpt-1.0.3.noripack`。在 Nori 设置 → 插件 → 本地安装启用，再从 ChatGPT OAuth 设置页登录；模型服务选择 ChatGPT (OAuth / Codex)，API Key 留空。
+生成包位于 `src/Nori.Plugins.ChatGpt/bin/Release/net10.0/io.nori.chatgpt-1.1.0.noripack`。在 Nori 设置 → 插件 → 本地安装启用，再从 ChatGPT OAuth 设置页选择已保存账号或新增账号，并点击 **Continue with ChatGPT**。登录后模型服务选择 ChatGPT (OAuth)，API Key 留空；模型列表来自当前账号的 `/v1/models`，不会回退到硬编码目录。
 
-设备码登录需要用户在系统浏览器中授权。真实设备授权与账号配额需安装后手动验证；测试使用模拟响应，并覆盖刷新令牌轮换与保存重试、退出删除重试、停用后凭证保留、恢复失败及敏感信息不泄漏。
+测试使用模拟 OAuth 响应和签名密钥，覆盖 loopback 回调、state/nonce/JWKS 验证、账号隔离、过期恢复、refresh token 轮换、取消、退出、旧凭证恢复和模型目录。**尚未使用真实 ChatGPT 账号完成端到端登录或真实额度请求验证。**
 
-登录页复用宿主 Nori 主题的字体、青色主按钮、危险操作样式、输入框与细线分组；生产插件不引用宿主程序集。可选 UI 测试直接加载主程序的实际主题，并检查 720×480 与 1080p 布局。
+## 官方协议来源
+
+- [Sign in with ChatGPT：Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+- [Accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
+- [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+- [Token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
+- [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)
+- [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+- [UI/UX guidelines](https://developers.openai.com/siwc/ui-ux-guidelines)
 
 ## 行为与边界
 
-- 使用 ChatGPT Codex OAuth 通道，不是 OpenAI Platform API 或浏览器会话；模型推荐列表不保证账号均可用。
-- 凭证只保存在插件隔离 KV 的加密字段；重启及插件重新加载后恢复，刷新令牌轮换后持久化。退出登录删除该插件凭证及其对应密钥；停用插件仅清空内存。
-- 请求固定发往 `auth.openai.com` 与 `chatgpt.com`，不把 OAuth 凭证发送到宿主配置的自定义地址。插件是受信任的进程内扩展，不是沙箱。
-- 不读取其他应用的凭证、不使用浏览器自动化/Cookie/API Key回退。远端协议变化可能导致授权失效。
+- 首次注册使用 `dynamic_agent_client` 和稳定的 `urn:uuid` 主机标识；回调签发的 client ID 才用于令牌交换与后续登录。已保存账号按 `(client_id, verified sub)` 分开保留。
+- OAuth 凭证以现有 Windows DPAPI、macOS Keychain 或 Linux Secret Service 保护，并作为密文保存在插件 `oauth_credentials` KV 项中。主机 ID 单独保存在非秘密 `oauth_host_id` KV 项中，退出登录不删除。Linux 需要安装 `secret-tool` 并解锁密钥环；不提供明文回退。
+- 令牌刷新尊重 `earliest_refresh_at`，并在轮换后持久化新 refresh token。退出登录尝试远端撤销，再清除当前账号的本地令牌；若撤销未确认，会明确提示。停用插件只清空内存、不删除存储。
+- 旧版 Codex 设备码凭证不会用于新 API，也不会自动删除；设置页会提示用户重新授权，只有明确操作“清除无法恢复的凭证”才会清理损坏或不兼容的旧凭证。
+- ChatGPT plan 授权必须包含 `chatgpt.tokens.use.direct` 与 `resource.invoke` 才允许推理。模型发现按官方规则保留 `visibility=list` 的 `slug` 和服务端排序；授权或请求失败时不会静默切换到 API key 或其他计费路径。
+- 请求固定发往 `auth.openai.com` 与 `api.openai.com`，不把 OAuth 凭证发送到宿主配置的自定义地址。插件是受信任的进程内扩展，不是沙箱。

@@ -6,9 +6,14 @@ namespace Nori.Plugins.ChatGpt;
 
 internal interface ICredentialStore
 {
-	Task<ChatGptCredential?> LoadAsync(CancellationToken cancellationToken);
-	Task SaveAsync(ChatGptCredential credential, CancellationToken cancellationToken);
+	Task<ChatGptAuthState?> LoadAsync(CancellationToken cancellationToken);
+	Task SaveAsync(ChatGptAuthState state, CancellationToken cancellationToken);
 	Task DeleteAsync(CancellationToken cancellationToken);
+}
+
+internal interface IHostIdStore
+{
+	Task<string> GetOrCreateAsync(CancellationToken cancellationToken);
 }
 
 internal interface ICredentialProtection
@@ -27,38 +32,40 @@ internal sealed class CredentialStore(
 {
 	private byte[]? _envelope;
 
-	public async Task<ChatGptCredential?> LoadAsync(CancellationToken cancellationToken)
+	public async Task<ChatGptAuthState?> LoadAsync(CancellationToken cancellationToken)
 	{
 		try
 		{
-			JsonNode? value = await read(cancellationToken);
+			JsonNode? value = await read(cancellationToken).ConfigureAwait(false);
 			if (value is null) return null;
 			string encoded = value.GetValue<string>();
 			if (encoded.Length > 3 * 1024 * 1024) throw new FormatException();
 			_envelope = Convert.FromBase64String(encoded);
 			if (_envelope.Length > 2 * 1024 * 1024) throw new FormatException();
-			byte[] plain = await protection.UnprotectAsync(_envelope, cancellationToken);
+			byte[] plain = await protection.UnprotectAsync(_envelope, cancellationToken).ConfigureAwait(false);
 			try
 			{
-				ChatGptCredential credential = JsonSerializer.Deserialize<ChatGptCredential>(plain) ?? throw new JsonException();
-				if (string.IsNullOrWhiteSpace(credential.AccessToken) || string.IsNullOrWhiteSpace(credential.RefreshToken) ||
-					string.IsNullOrWhiteSpace(credential.AccountId) || credential.ExpiresAt == default ||
-					ChatGptAuth.AccountIdFromToken(credential.AccessToken) != credential.AccountId) throw new JsonException();
-				return credential;
+				using JsonDocument document = JsonDocument.Parse(plain);
+				if (IsLegacyCredential(document.RootElement)) throw new LegacyCodexCredentialException();
+				ChatGptAuthState state = JsonSerializer.Deserialize<ChatGptAuthState>(plain) ?? throw new JsonException();
+				Validate(state);
+				return state;
 			}
 			finally { CryptographicOperations.ZeroMemory(plain); }
 		}
 		catch (OperationCanceledException) { throw; }
-		catch { throw new InvalidOperationException("无法恢复 ChatGPT 登录数据：密文损坏或系统密钥库不可用。请重新登录，或退出登录以清除保存的数据。"); }
+		catch (LegacyCodexCredentialException) { throw; }
+		catch { throw new InvalidOperationException("无法恢复 ChatGPT 登录数据：密文损坏或系统密钥库不可用。原数据已保留。请重新登录，或检查系统密钥库。"); }
 	}
 
-	public async Task SaveAsync(ChatGptCredential credential, CancellationToken cancellationToken)
+	public async Task SaveAsync(ChatGptAuthState state, CancellationToken cancellationToken)
 	{
-		byte[] plain = JsonSerializer.SerializeToUtf8Bytes(credential);
+		Validate(state);
+		byte[] plain = JsonSerializer.SerializeToUtf8Bytes(state);
 		try
 		{
-			byte[] envelope = await protection.ProtectAsync(plain, cancellationToken);
-			await write(JsonValue.Create(Convert.ToBase64String(envelope))!, cancellationToken);
+			byte[] envelope = await protection.ProtectAsync(plain, cancellationToken).ConfigureAwait(false);
+			await write(JsonValue.Create(Convert.ToBase64String(envelope))!, cancellationToken).ConfigureAwait(false);
 			_envelope = envelope;
 		}
 		catch (OperationCanceledException) { throw; }
@@ -68,16 +75,77 @@ internal sealed class CredentialStore(
 
 	public async Task DeleteAsync(CancellationToken cancellationToken)
 	{
-		try { await delete(cancellationToken); }
+		try { await delete(cancellationToken).ConfigureAwait(false); }
 		catch (OperationCanceledException) { throw; }
 		catch { throw new InvalidOperationException("无法删除 ChatGPT 登录数据，请检查插件数据目录权限后重试。"); }
 		byte[]? envelope = _envelope;
 		_envelope = null;
 		if (envelope is not null)
 		{
-			// 密文已删除；清理不可用的密钥环条目失败，不应让已完成的退出变成失败。
-			try { await protection.DeleteKeyAsync(envelope, CancellationToken.None); }
+			try { await protection.DeleteKeyAsync(envelope, CancellationToken.None).ConfigureAwait(false); }
 			catch (Exception) { }
 		}
 	}
+
+	private static bool IsLegacyCredential(JsonElement root) =>
+		root.ValueKind == JsonValueKind.Object &&
+		(root.TryGetProperty("AccessToken", out _) || root.TryGetProperty("access_token", out _)) &&
+		!root.TryGetProperty("Registrations", out _) && !root.TryGetProperty("registrations", out _);
+
+	private static void Validate(ChatGptAuthState state)
+	{
+		if (state.Registrations is null) throw new JsonException();
+		HashSet<string> registrations = new(StringComparer.Ordinal);
+		foreach (ChatGptRegistration registration in state.Registrations)
+		{
+			if (string.IsNullOrWhiteSpace(registration.ClientId) || string.IsNullOrWhiteSpace(registration.Subject) ||
+				!registrations.Add(registration.ClientId + "\0" + registration.Subject)) throw new JsonException();
+			if (registration.Credential is not { } credential) continue;
+			if (string.IsNullOrWhiteSpace(credential.AccessToken) || string.IsNullOrWhiteSpace(credential.RefreshToken) ||
+				string.IsNullOrWhiteSpace(credential.IdToken) || string.IsNullOrWhiteSpace(credential.ClientId) ||
+				string.IsNullOrWhiteSpace(credential.Subject) || credential.ExpiresAt == default || credential.EarliestRefreshAt == default ||
+				credential.ClientId != registration.ClientId || credential.Subject != registration.Subject || credential.AccountId != credential.Subject || credential.Scopes != registration.Scopes)
+				throw new JsonException();
+		}
+		if ((state.ActiveClientId is null) != (state.ActiveSubject is null) ||
+			state.ActiveClientId is not null && !state.Registrations.Any(registration => registration.ClientId == state.ActiveClientId && registration.Subject == state.ActiveSubject))
+			throw new JsonException();
+	}
+}
+
+/// <summary>稳定主机标识单独保存在非秘密 KV 中，退出登录不删除。</summary>
+internal sealed class HostIdStore(
+	Func<CancellationToken, Task<string?>> read,
+	Func<string, CancellationToken, Task> write) : IHostIdStore
+{
+	private readonly SemaphoreSlim _gate = new(1, 1);
+
+	public async Task<string> GetOrCreateAsync(CancellationToken cancellationToken)
+	{
+		await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			string? saved;
+			try { saved = await read(cancellationToken).ConfigureAwait(false); }
+			catch (OperationCanceledException) { throw; }
+			catch { throw new InvalidOperationException("无法读取已保存的 ChatGPT 主机标识，请检查插件存储。"); }
+
+			if (saved is not null)
+			{
+				if (IsHostId(saved)) return saved;
+				throw new InvalidOperationException("已保存的 ChatGPT 主机标识无效；为避免创建新的注册，请检查插件存储。");
+			}
+
+			string created = $"urn:uuid:{Guid.NewGuid():D}";
+			try { await write(created, cancellationToken).ConfigureAwait(false); }
+			catch (OperationCanceledException) { throw; }
+			catch { throw new InvalidOperationException("无法保存稳定的 ChatGPT 主机标识，请检查插件存储。"); }
+			return created;
+		}
+		finally { _gate.Release(); }
+	}
+
+	private static bool IsHostId(string value) =>
+		value.StartsWith("urn:uuid:", StringComparison.Ordinal) && Guid.TryParseExact(value[9..], "D", out Guid id) &&
+		string.Equals(value, $"urn:uuid:{id:D}", StringComparison.Ordinal);
 }

@@ -6,6 +6,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Nori.PluginSDK" Version="2.4.1" />
+		<PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.14.0" />
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" GeneratePathProperty="true" />
 		<InternalsVisibleTo Include="Nori.Plugins.ChatGpt.Tests" />
 	</ItemGroup>
@@ -16,7 +17,7 @@
 		</PropertyGroup>
 		<RemoveDir Directories="$(PluginStage)" />
 		<MakeDir Directories="$(PluginStage)lib" />
-		<Copy SourceFiles="$(TargetPath);$(NuGetPackageRoot)system.security.cryptography.protecteddata/10.0.0/lib/net10.0/System.Security.Cryptography.ProtectedData.dll" DestinationFolder="$(PluginStage)lib" />
+		<Copy SourceFiles="$(TargetPath);$(NuGetPackageRoot)system.security.cryptography.protecteddata/10.0.0/lib/net10.0/System.Security.Cryptography.ProtectedData.dll;$(NuGetPackageRoot)microsoft.identitymodel.jsonwebtokens/8.14.0/lib/net8.0/Microsoft.IdentityModel.JsonWebTokens.dll;$(NuGetPackageRoot)microsoft.identitymodel.tokens/8.14.0/lib/net8.0/Microsoft.IdentityModel.Tokens.dll;$(NuGetPackageRoot)microsoft.identitymodel.logging/8.14.0/lib/net8.0/Microsoft.IdentityModel.Logging.dll;$(NuGetPackageRoot)microsoft.identitymodel.abstractions/8.14.0/lib/net8.0/Microsoft.IdentityModel.Abstractions.dll" DestinationFolder="$(PluginStage)lib" />
 		<Copy SourceFiles="manifest.json;../../README.md" DestinationFolder="$(PluginStage)" />
 		<ZipDirectory SourceDirectory="$(PluginStage)" DestinationFile="$(PluginPackage)" Overwrite="true" />
 	</Target>

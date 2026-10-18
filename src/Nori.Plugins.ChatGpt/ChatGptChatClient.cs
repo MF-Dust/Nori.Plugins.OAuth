@@ -7,13 +7,14 @@ using Microsoft.Extensions.AI;
 
 namespace Nori.Plugins.ChatGpt;
 
-/// <summary>将 ChatGPT 订阅的 Codex Responses 流转换为宿主的聊天与工具契约。</summary>
+/// <summary>将官方 SIWC 订阅授权的 Responses 流转换为宿主的聊天与工具契约。</summary>
 internal sealed class ChatGptChatClient(
 	HttpClient http,
 	Func<CancellationToken, Task<ChatGptCredential>> getCredential,
 	string model) : IChatClient
 {
-	private static readonly Uri Endpoint = new("https://chatgpt.com/backend-api/codex/responses");
+	private static readonly Uri Endpoint = new("https://api.openai.com/v1/responses");
+	private const string ToolNamespace = "nori";
 	private const string ItemIdKey = "chatgpt.item_id";
 	private const int MaximumFrameBytes = 1024 * 1024;
 	private const int MaximumResponseBytes = 32 * 1024 * 1024;
@@ -43,17 +44,13 @@ internal sealed class ChatGptChatClient(
 			Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
 		};
 		request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AccessToken);
-		request.Headers.Add("chatgpt-account-id", credential.AccountId);
-		request.Headers.Add("OpenAI-Beta", "responses=experimental");
-		request.Headers.Add("originator", "nori");
 		request.Headers.UserAgent.ParseAdd("Nori.Desktop");
 		request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
 		using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 		if (!response.IsSuccessStatusCode)
 		{
-			// 错误正文和 ReasonPhrase 可能回显令牌、提示词或账户信息，均不进入异常。
-			throw new HttpRequestException($"ChatGPT 请求失败（HTTP {(int)response.StatusCode}），请检查登录状态或订阅额度。", null, response.StatusCode);
+			throw await ChatGptApiException.FromResponseAsync(response, cancellationToken).ConfigureAwait(false);
 		}
 
 		using StreamReader reader = new(new BoundedSseStream(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false)), Encoding.UTF8);
@@ -102,9 +99,8 @@ internal sealed class ChatGptChatClient(
 				case "response.failed":
 				case "error":
 				case "response.error":
-					throw new InvalidOperationException("ChatGPT 生成回复失败，请检查登录状态或稍后重试。");
+					throw ChatGptApiException.FromStream(item, response);
 				case "response.completed":
-				case "response.done":
 					JsonElement final = Response(item);
 					string? status = String(final, "status");
 					if (status == "incomplete") throw new InvalidOperationException("ChatGPT 回复未完成，请重试或减少输入内容。");
@@ -178,7 +174,7 @@ internal sealed class ChatGptChatClient(
 						FlushText();
 						JsonObject function = new()
 						{
-							["type"] = "function_call", ["call_id"] = call.CallId, ["name"] = call.Name,
+							["type"] = "function_call", ["call_id"] = call.CallId, ["name"] = call.Name, ["namespace"] = ToolNamespace,
 							["arguments"] = JsonSerializer.Serialize(call.Arguments ?? new Dictionary<string, object?>(), AIJsonUtilities.DefaultOptions),
 						};
 						if (call.AdditionalProperties?.TryGetValue(ItemIdKey, out object? id) == true && id is string itemId)
@@ -236,7 +232,11 @@ internal sealed class ChatGptChatClient(
 					["parameters"] = JsonNode.Parse(function.JsonSchema.GetRawText()), ["strict"] = false,
 				});
 			}
-			body["tools"] = converted;
+			body["tools"] = new JsonArray(new JsonObject
+			{
+				["type"] = "namespace", ["name"] = ToolNamespace,
+				["description"] = "由 Nori 桌面伴侣提供并在用户本机执行的工具。", ["tools"] = converted,
+			});
 		}
 		return body;
 	}
@@ -414,6 +414,7 @@ internal sealed class ChatGptChatClient(
 
 		internal void SetCall(int index, JsonElement item, bool completed)
 		{
+			if (String(item, "namespace") is { Length: > 0 } toolNamespace && toolNamespace != ToolNamespace) throw ProtocolError();
 			PendingCall call = Call(index);
 			call.Id = String(item, "call_id") ?? call.Id;
 			call.Name = String(item, "name") ?? call.Name;

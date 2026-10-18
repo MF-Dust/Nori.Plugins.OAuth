@@ -33,10 +33,9 @@ public sealed class LoginPageTests
 			ScrollViewer scroll = Assert.IsType<ScrollViewer>(page.Control);
 			Assert.True(scroll.Viewport.Height > 0);
 			Assert.True(scroll.Extent.Width <= scroll.Viewport.Width + 1);
-			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "登录 ChatGPT") && item.IsEnabled);
-			TextBox code = Assert.Single(page.Control.GetLogicalDescendants().OfType<TextBox>());
-			Assert.True(code.IsReadOnly);
-			Button login = Assert.Single(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "登录 ChatGPT"));
+			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "Continue with ChatGPT") && item.IsEnabled);
+			Assert.Empty(page.Control.GetLogicalDescendants().OfType<TextBox>());
+			Button login = Assert.Single(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "Continue with ChatGPT"));
 			Assert.Contains("accent", login.Classes);
 			Assert.Equal(32, login.MinHeight);
 			Assert.Equal(6, login.CornerRadius.TopLeft);
@@ -45,6 +44,10 @@ public sealed class LoginPageTests
 			Assert.Equal(14, heading.FontSize);
 			Assert.Equal(window.Foreground, heading.Foreground);
 			Assert.Contains("danger", Assert.Single(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "退出登录")).Classes);
+			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "Manage usage"));
+			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "重新打开授权页面"));
+			Assert.Contains(page.Control.GetLogicalDescendants().OfType<Button>(), item => Equals(item.Content, "取消登录"));
+			Assert.DoesNotContain(page.Control.GetLogicalDescendants().OfType<TextBlock>(), item => item.Text?.Contains("设备码", StringComparison.Ordinal) == true);
 			string? directory = Environment.GetEnvironmentVariable("NORI_UI_CAPTURE_DIR");
 			if (!string.IsNullOrEmpty(directory))
 			{

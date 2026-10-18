@@ -78,13 +78,13 @@ public sealed class ChatGptChatClientTests
 
 		Assert.Equal("好", response.Text);
 		CapturedRequest request = Assert.Single(handler.Requests);
-		Assert.Equal("https://chatgpt.com/backend-api/codex/responses", request.Uri.AbsoluteUri);
+		Assert.Equal("https://api.openai.com/v1/responses", request.Uri.AbsoluteUri);
 		Assert.Equal(HttpMethod.Post, request.Method);
 		Assert.Equal("Bearer access-secret", request.Headers["Authorization"]);
-		Assert.Equal("account-secret", request.Headers["chatgpt-account-id"]);
-		Assert.Equal("responses=experimental", request.Headers["OpenAI-Beta"]);
+		Assert.False(request.Headers.ContainsKey("chatgpt-account-id"));
+		Assert.False(request.Headers.ContainsKey("OpenAI-Beta"));
 		Assert.Equal("text/event-stream", request.Headers["Accept"]);
-		Assert.Equal("nori", request.Headers["originator"]);
+		Assert.False(request.Headers.ContainsKey("originator"));
 		Assert.Contains("Nori", request.Headers["User-Agent"], StringComparison.Ordinal);
 		Assert.False(rawFactoryCalled);
 		JsonNode json = JsonNode.Parse(request.Body)!;
@@ -157,7 +157,10 @@ public sealed class ChatGptChatClientTests
 		], options);
 
 		JsonNode json = JsonNode.Parse(Assert.Single(handler.Requests).Body)!;
-		JsonNode tool = Assert.Single(json["tools"]!.AsArray())!;
+		JsonNode group = Assert.Single(json["tools"]!.AsArray())!;
+		Assert.Equal("namespace", group["type"]!.GetValue<string>());
+		Assert.Equal("nori", group["name"]!.GetValue<string>());
+		JsonNode tool = Assert.Single(group["tools"]!.AsArray())!;
 		Assert.Equal("function", tool["type"]!.GetValue<string>());
 		Assert.Equal("get_weather", tool["name"]!.GetValue<string>());
 		Assert.Equal("查询天气", tool["description"]!.GetValue<string>());
@@ -170,6 +173,7 @@ public sealed class ChatGptChatClientTests
 		JsonArray input = json["input"]!.AsArray();
 		Assert.Equal("先查", input[0]!["content"]![0]!["text"]!.GetValue<string>());
 		Assert.Equal("function_call", input[1]!["type"]!.GetValue<string>());
+		Assert.Equal("nori", input[1]!["namespace"]!.GetValue<string>());
 		Assert.Equal("call_1", input[1]!["call_id"]!.GetValue<string>());
 		Assert.Equal("上海", JsonNode.Parse(input[1]!["arguments"]!.GetValue<string>())!["city"]!.GetValue<string>());
 		Assert.Equal("function_call_output", input[2]!["type"]!.GetValue<string>());
@@ -413,13 +417,13 @@ public sealed class ChatGptChatClientTests
 	}
 
 	[Fact]
-	public async Task 支持Codex的done完成事件别名()
+	public async Task 旧Codex的done事件不能当作官方完成事件()
 	{
 		ScriptedHandler handler = new(Sse(TextFinished("完成").Replace("response.completed", "response.done", StringComparison.Ordinal)));
 		using HttpClient http = new(handler);
 		using ChatGptChatClient client = Client(http);
 
-		Assert.Equal("完成", (await client.GetResponseAsync(Hello)).Text);
+		await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync(Hello));
 	}
 
 	[Theory]
@@ -427,7 +431,7 @@ public sealed class ChatGptChatClientTests
 	[InlineData(403)]
 	[InlineData(429)]
 	[InlineData(500)]
-	public async Task HTTP失败只暴露状态码且不读取敏感正文(int status)
+	public async Task HTTP错误正文读取失败仍不暴露敏感信息(int status)
 	{
 		NeverReadContent content = new();
 		ScriptedHandler handler = new(new HttpResponseMessage((HttpStatusCode)status)
@@ -443,7 +447,7 @@ public sealed class ChatGptChatClientTests
 		Assert.Contains(status.ToString(), error.Message, StringComparison.Ordinal);
 		Assert.DoesNotContain("secret", error.ToString(), StringComparison.Ordinal);
 		Assert.DoesNotContain("私密提示词", error.ToString(), StringComparison.Ordinal);
-		Assert.False(content.Read);
+		Assert.True(content.Read);
 		Assert.True(content.Disposed);
 	}
 
@@ -588,9 +592,67 @@ public sealed class ChatGptChatClientTests
 		ChatClientMetadata metadata = Assert.IsType<ChatClientMetadata>(client.GetService(typeof(ChatClientMetadata)));
 		Assert.Equal("ChatGPT", metadata.ProviderName);
 		Assert.Equal("gpt-5", metadata.DefaultModelId);
-		Assert.Equal("https://chatgpt.com/backend-api/codex/responses", metadata.ProviderUri?.AbsoluteUri);
+		Assert.Equal("https://api.openai.com/v1/responses", metadata.ProviderUri?.AbsoluteUri);
 		Assert.Null(client.GetService(typeof(HttpClient)));
 		Assert.Null(client.GetService(typeof(IChatClient), "other"));
+	}
+
+	[Fact]
+	public async Task 官方通道忽略不支持的推理选项且不发送持久会话字段()
+	{
+		ScriptedHandler handler = new(Sse(Finished));
+		using HttpClient http = new(handler);
+		using ChatGptChatClient client = Client(http);
+		ChatOptions options = new() { Temperature = 0.7f, TopP = 0.9f, MaxOutputTokens = 100,
+			AdditionalProperties = new() { ["previous_response_id"] = "old", ["metadata"] = "secret", ["background"] = true, ["store"] = true } };
+		await client.GetResponseAsync(Hello, options);
+		JsonObject json = JsonNode.Parse(Assert.Single(handler.Requests).Body)!.AsObject();
+		foreach (string key in new[] { "temperature", "top_p", "max_output_tokens", "previous_response_id", "metadata", "background" }) Assert.False(json.ContainsKey(key));
+		Assert.False(json["store"]!.GetValue<bool>());
+		Assert.True(json["stream"]!.GetValue<bool>());
+	}
+
+	[Theory]
+	[InlineData("nori", true)]
+	[InlineData("other_app", false)]
+	public async Task 命名空间工具只映射到Nori本机工具(string toolNamespace, bool accepted)
+	{
+		string completed = CallFinished("{}");
+		JsonNode json = JsonNode.Parse(completed)!;
+		json["response"]!["output"]![0]!["namespace"] = toolNamespace;
+		ScriptedHandler handler = new(Sse(json.ToJsonString()));
+		using HttpClient http = new(handler);
+		using ChatGptChatClient client = Client(http);
+		if (accepted) Assert.Equal("get_weather", Assert.Single((await client.GetResponseAsync(Hello)).Messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>()).Name);
+		else await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync(Hello));
+	}
+
+	[Fact]
+	public async Task 官方额度错误保留机器码与请求ID但不暴露正文()
+	{
+		HttpResponseMessage response = new(HttpStatusCode.TooManyRequests)
+		{
+			Content = new StringContent("""{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"access-secret 私密提示词"}}"""),
+		};
+		response.Headers.Add("x-request-id", "req_test123");
+		using HttpClient http = new(new ScriptedHandler(response));
+		using ChatGptChatClient client = Client(http);
+		HttpRequestException error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetResponseAsync(Hello));
+		Assert.Equal("subscription_sharing_usage_limit_exceeded", error.Data["openai.error_code"]);
+		Assert.Equal("req_test123", error.Data["openai.request_id"]);
+		Assert.Contains("Usage", error.Message);
+		Assert.DoesNotContain("access-secret", error.ToString());
+		Assert.DoesNotContain("私密提示词", error.ToString());
+	}
+
+	[Fact]
+	public async Task 流式额度错误不能返回成功或触发半成品工具()
+	{
+		using HttpClient http = new(new ScriptedHandler(Sse("""{"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_unavailable","message":"access-secret"}}}""")));
+		using ChatGptChatClient client = Client(http);
+		InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetResponseAsync(Hello));
+		Assert.Equal("subscription_sharing_usage_unavailable", error.Data["openai.error_code"]);
+		Assert.DoesNotContain("access-secret", error.ToString());
 	}
 
 	private sealed record CapturedRequest(Uri Uri, HttpMethod Method, string Body, Dictionary<string, string> Headers);

@@ -22,6 +22,20 @@ public sealed class HostPackageTests
 				using (StreamWriter writer = new(archive.CreateEntry("manifest.json").Open())) writer.Write(ManifestTests.ReadManifest());
 				archive.CreateEntryFromFile(typeof(Plugin).Assembly.Location, "lib/Nori.Plugins.ChatGpt.dll");
 				archive.CreateEntryFromFile(typeof(ProtectedData).Assembly.Location, "lib/System.Security.Cryptography.ProtectedData.dll");
+				string output = Path.GetDirectoryName(typeof(Plugin).Assembly.Location)!;
+				foreach (string dependency in new[] { "Microsoft.IdentityModel.JsonWebTokens", "Microsoft.IdentityModel.Tokens", "Microsoft.IdentityModel.Logging", "Microsoft.IdentityModel.Abstractions" })
+					archive.CreateEntryFromFile(Path.Combine(output, dependency + ".dll"), "lib/" + dependency + ".dll");
+			}
+
+			using (ZipArchive archive = ZipFile.OpenRead(package))
+			{
+				string[] entries = archive.Entries.Select(entry => entry.FullName).ToArray();
+				Assert.Contains("lib/Microsoft.IdentityModel.JsonWebTokens.dll", entries);
+				Assert.Contains("lib/Microsoft.IdentityModel.Tokens.dll", entries);
+				Assert.Contains("lib/Microsoft.IdentityModel.Logging.dll", entries);
+				Assert.Contains("lib/Microsoft.IdentityModel.Abstractions.dll", entries);
+				Assert.DoesNotContain(entries, entry => entry.EndsWith("/Nori.PluginRuntime.dll", StringComparison.OrdinalIgnoreCase));
+				Assert.DoesNotContain(entries, entry => entry.EndsWith("/Nori.PluginSDK.dll", StringComparison.OrdinalIgnoreCase));
 			}
 
 			// 安装器是宿主内部类型；测试调用真实校验实现，不复制一套宽松的规则。
